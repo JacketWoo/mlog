@@ -14,9 +14,9 @@
 void* log_out(void *arg) {
 	uint32_t tid = *reinterpret_cast<uint32_t*>(arg);
 	for (int i = 0; i < 100000; ++i) {
-		LOG(INFO) << "[" << tid << "]" << " I am a info log, no is: " << i << "\n";
-		LOG(INFO) << " I am a\n";
-		LOG(INFO);
+		LOG(MINFO) << "[" << tid << "]" << " I am a info log, no is: " << i << "\n";
+		LOG(MINFO) << " I am a\n";
+		LOG(MINFO);
 	}
 	return NULL;
 }

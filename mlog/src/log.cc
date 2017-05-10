@@ -33,18 +33,20 @@ struct LogMeta {
 
 LogMeta::LogMeta() {
 
-	log_level_prompts.insert(std::make_pair(kTrace,  "[TRACE]"));
-	log_level_prompts.insert(std::make_pair(kDebug,  "[DEBUG]"));
-	log_level_prompts.insert(std::make_pair(kInfo,   "[INFO ]"));
-	log_level_prompts.insert(std::make_pair(kWarn,   "[WARN ]"));
-	log_level_prompts.insert(std::make_pair(kError,  "[ERROR]"));
-	log_level_prompts.insert(std::make_pair(kFatal,  "[FATAL]"));
+	log_level_prompts.insert(std::make_pair(kTrace,  "[TRACE]\t"));
+	log_level_prompts.insert(std::make_pair(kDebug,  "[DEBUG]\t"));
+	log_level_prompts.insert(std::make_pair(kInfo,   "[INFO ]\t"));
+	log_level_prompts.insert(std::make_pair(kWarn,   "[WARN ]\t"));
+	log_level_prompts.insert(std::make_pair(kError,  "[ERROR]\t"));
+	log_level_prompts.insert(std::make_pair(kDot,    "[ DOT ]\t"));
+	log_level_prompts.insert(std::make_pair(kFatal,  "[FATAL]\t"));
 
 	log_level_strs.insert(std::make_pair(kTrace, "trace" ));
 	log_level_strs.insert(std::make_pair(kDebug, "debug" ));
 	log_level_strs.insert(std::make_pair(kInfo,  "info" ));
 	log_level_strs.insert(std::make_pair(kWarn,  "warn" ));
 	log_level_strs.insert(std::make_pair(kError, "error" ));
+	log_level_strs.insert(std::make_pair(kDot,   "dot"));
 	log_level_strs.insert(std::make_pair(kFatal, "fatal"));
 
 	pthread_mutex_t* mutex_p = NULL;
@@ -131,7 +133,7 @@ void Init(const LogLevel level, const std::string &log_dir, const std::string &f
 
 	std::string file_name;
 	FILE *file;
-	for (int32_t idx = kInfo; idx < kMaxLevel; ++idx) {
+	for (int32_t idx = kTrace; idx < kMaxLevel; ++idx) {
 		file_name = file_prefix.empty() ? "" : (file_prefix + "_");
 		file_name = log_path + "/" + file_name; 
 		file_name += log_meta.log_level_strs[static_cast<LogLevel>(idx)] + ".log";
@@ -176,7 +178,7 @@ bool SetLogLevel(const std::string &level_str) {
 
 Log::Log(const LogLevel level) {
 	self_level_ = level;
-	strm_ << log_meta.log_level_prompts[self_level_] << "\t\t";
+	strm_ << log_meta.log_level_prompts[self_level_];
 }
 
 Log::~Log() {
@@ -203,14 +205,21 @@ int32_t Write(const LogLevel level, const std::string& str) {
   if (level < work_level) {
     return ret;
   }
+	std::string line(log_meta.log_level_prompts[level]);
+	line.append(str);
 	if (log_meta.screen_out) {
 		pthread_mutex_lock(log_meta.screen_mutex_);
-		std::cerr << str;
+		std::cerr << line;
 		pthread_mutex_unlock(log_meta.screen_mutex_);
 	}
 
 	pthread_mutex_lock(log_meta.log_level_mutexes_[level]);
-	ret = fwrite(str.c_str(), str.size(), 1, log_meta.log_level_files[level]);
+	ret = fwrite(line.c_str(), line.size(), 1, log_meta.log_level_files[level]);
+  #ifdef DEBUG	
+	if (ret != -1) {
+		fflush(log_meta.log_level_files[level]);
+	}
+	#endif
 	pthread_mutex_unlock(log_meta.log_level_mutexes_[level]); 
   if (ret < 1) {
 		 std::cerr << __FILE__ << ":"  << __LINE__ << ", write " << log_meta.log_level_strs[level] << " failed" << std::endl;
@@ -225,7 +234,7 @@ int32_t Write(const LogLevel level, const char* format, ...) {
   if (level < work_level) {
     return ret;
   }
-  
+ 	memcpy(buf, log_meta.log_level_prompts[level].data(), log_meta.log_level_prompts[level].size());
   if (log_meta.screen_out) {
     va_list vl;
     va_start(vl, format);
@@ -237,7 +246,7 @@ int32_t Write(const LogLevel level, const char* format, ...) {
   
   va_list vl;
   va_start(vl, format);
-  int32_t len = vsnprintf(buf, sizeof(buf), format, vl);
+  int32_t len = vsnprintf(buf+log_meta.log_level_prompts[level].size(), sizeof(buf) - log_meta.log_level_prompts[level].size(), format, vl);
   va_end(vl); 
   if (len < 0) {
     return -1;

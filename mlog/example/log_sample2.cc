@@ -2,17 +2,35 @@
  * test for Write api
  */
 #include <sys/time.h>
+#include <time.h>
+#include <unistd.h>
 
 #include <vector>
 #include <pthread.h>
 #include <iostream>
+#include <initializer_list>
 
 #include "log.h"
 
+int32_t Log(const mlog::LogLevel level, const std::initializer_list<std::string>& args) {
+  time_t now = time(NULL);
+  char* time_ptr = ctime(&now);
+  std::string line = time_ptr;
+  line.append("|");
+
+  for (const std::string& arg : args) {
+    line.append(arg);
+    line.append("|");
+  }
+  line.append("\n");
+  mlog::Write(level, line);
+  return 0;
+}
 
 void* log_out(void *arg) {
-	for (int i = 0; i < 100000; ++i) {
-    mlog::Write(INFO, "buyunff I am a info log\n");
+	for (int i = 0; i < 1; ++i) {
+    //mlog::Write(MINFO, "buyunff I am a info log\n");
+		Log(MDOT, {"a1@123", "6919022924116746787", "send"});
 	}
 	return NULL;
 }
@@ -45,5 +63,6 @@ int main() {
 
 	std::cerr << "finished ...." << std::endl;
 	std::cerr << "time elapsed: " << MicroTimes() - start_us << " us" << std::endl;
+	sleep(3000);
 	return 0;
 }

@@ -1,5 +1,6 @@
 CXX = g++
-CXXFLAGS = -Wall -W -Wno-unused-parameter -pg -g -O3 -D__STDC_FORMAT_MACROS -fPIC -std=c++11
+#CXXFLAGS = -Wall -W -Wno-unused-parameter -pg -g -O0 -D__STDC_FORMAT_MACROS -fPIC -std=c++11
+CXXFLAGS = -O0 -g -pg -pipe -fPIC -W -DTEST -DDEBUG -Wwrite-strings -Wpointer-arith -Wreorder -Wredundant-decls -Wformat -Wall -Wno-unused-parameter -D_GNU_SOURCE -D__STDC_FORMAT_MACROS -std=c++11 -Wno-redundant-decls
 
 OBJECT = mlog
 OUTPUT = ./output
@@ -28,7 +29,7 @@ $(LIBRARY): $(OBJS)
 	rm -rf $@
 	ar -rcs $@ $(OBJS)
 	cp -rf ./include/*.h $(OUTPUT)/include
-	mv ./libmlog.a $(OUTPUT)/lib/
+	cp ./libmlog.a $(OUTPUT)/lib/
 	make -C ./example
 
 $(OBJECT): $(OBJS)
@@ -45,5 +46,6 @@ clean:
 	rm -rf $(OUTPUT)
 	rm -rf $(LIBRARY)
 	rm -rf $(OBJECT)
+	rm -rf ./libmlog.a
 	make clean -C ./example
 

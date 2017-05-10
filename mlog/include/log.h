@@ -16,6 +16,7 @@ enum LogLevel {
 	kInfo,
 	kWarn,
 	kError,
+	kDot,
 	kFatal,
 	kMaxLevel
 };
@@ -46,12 +47,13 @@ int32_t Write(const LogLevel level, const std::string& str);
 int32_t Write(const LogLevel level, const char* format, ...);
 }
 
-#define TRACE   mlog::kTrace
-#define DEBUG   mlog::kDebug
-#define INFO    mlog::kInfo
-#define WARN    mlog::kWarn
-#define ERROR   mlog::kError
-#define FATAL   mlog::kFatal
+#define MTRACE   mlog::kTrace
+#define MDEBUG   mlog::kDebug
+#define MINFO    mlog::kInfo
+#define MWARN    mlog::kWarn
+#define MERROR   mlog::kError
+#define MDOT     mlog::kDot
+#define MFATAL   mlog::kFatal
 
 #define LOG(level) \
 	if (level >= mlog::work_level) \

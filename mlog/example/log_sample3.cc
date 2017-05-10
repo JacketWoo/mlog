@@ -14,7 +14,7 @@
 void* log_out(void *arg) {
 	uint32_t tid = *reinterpret_cast<uint32_t*>(arg);
 	for (int i = 0; i < 5; ++i) {
-    mlog::Write(INFO, "[%u] I am a info log, no is: %d\n", tid, i);
+    mlog::Write(MINFO, "[%u] I am a info log, no is: %d\n", tid, i);
     std::cerr << i << std::endl;
 	}
 	return NULL;
