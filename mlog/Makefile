@@ -44,6 +44,7 @@ $(TOBJS): %.o : %.cc
 
 clean: 
 	rm -rf ./*.o
+	rm -rf ./src/*.o
 	rm -rf $(OUTPUT)
 	rm -rf $(LIBRARY)
 	rm -rf $(OBJECT)
