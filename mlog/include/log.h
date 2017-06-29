@@ -7,6 +7,7 @@
 #include <string>
 #include <sstream>
 #include <map>
+#include <memory>
 
 namespace mlog {
 
@@ -39,6 +40,7 @@ private:
 };
 
 void Init(const LogLevel level = kInfo, const std::string &log_dir = "./log", const std::string &file_prefix = "", const bool screen_out = true);
+void BackupAndSwitchLog(const std::string& date=""); 
 bool SetLogLevel(const std::string &level_str);
 bool SetLogDir(const std::string &level_dir);
 

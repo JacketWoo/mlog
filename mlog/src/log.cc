@@ -15,6 +15,15 @@
 
 namespace mlog {
 
+struct MlogFile {
+  MlogFile(FILE* f) : fp(f) {}
+  virtual ~MlogFile() {
+    if (fp) {
+      fclose(fp);
+    }
+  }
+  FILE* fp;
+};
 
 struct LogMeta {
 	LogMeta();
@@ -22,9 +31,9 @@ struct LogMeta {
 
 	std::map<LogLevel, std::string> log_level_prompts;
 	std::map<LogLevel, std::string> log_level_strs;
-	std::map<LogLevel, FILE*> log_level_files;
-	std::map<LogLevel, pthread_mutex_t*> log_level_mutexes_;
-	pthread_mutex_t *screen_mutex_;
+
+  pthread_rwlock_t *log_level_files_rwlock;
+	std::map<LogLevel, std::shared_ptr<MlogFile> > log_level_files;
 	
 	std::string dir;
 	std::string file_prefix;
@@ -49,34 +58,31 @@ LogMeta::LogMeta() {
 	log_level_strs.insert(std::make_pair(kDot,   "dot"));
 	log_level_strs.insert(std::make_pair(kFatal, "fatal"));
 
-	pthread_mutex_t* mutex_p = NULL;
-	for (uint32_t level = kTrace; level < kMaxLevel; ++level) {
-		mutex_p = new pthread_mutex_t;
-		pthread_mutex_init(mutex_p, NULL);
-		log_level_mutexes_.insert(std::make_pair(static_cast<LogLevel>(level), mutex_p));
-	}
-	screen_mutex_ = new pthread_mutex_t;
-	pthread_mutex_init(screen_mutex_, NULL);
+  pthread_rwlockattr_t attr;
+  pthread_rwlockattr_init(&attr);
+  pthread_rwlockattr_setkind_np(&attr, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
+  log_level_files_rwlock = new pthread_rwlock_t;
+  pthread_rwlock_init(log_level_files_rwlock, &attr);
 }
 
 LogMeta::~LogMeta() {
-
-	LogLevel level;
-	for (uint32_t idx = kTrace; idx < kMaxLevel; ++idx) {	
-		level = static_cast<LogLevel>(idx);
-		if (log_level_files[level]) {
-			fclose(log_level_files[level]);
-		}
-		pthread_mutex_destroy(log_level_mutexes_[level]);
-		delete log_level_mutexes_[level];
-	}
-	pthread_mutex_destroy(screen_mutex_);
-
+  pthread_rwlock_destroy(log_level_files_rwlock);
 }
 
 LogLevel work_level;
 LogMeta log_meta;
 
+static inline void  WriteFormat(FILE* file, const char* format, ...) {
+  char buf[1024]; 
+  va_list vl;
+  va_start(vl, format);
+  int32_t len = vsnprintf(buf, sizeof(buf), format, vl); 
+  va_end(vl);
+  if (len < 0) {
+    return;
+  }
+  fwrite(buf, strlen(buf), 1, file); 
+}
 
 static int DoCreatePath(const char *path, mode_t mode) {
   struct stat st;
@@ -92,7 +98,7 @@ static int DoCreatePath(const char *path, mode_t mode) {
     status = -1;
   }
 
-  return (status);
+  return status;
 }
 
 static int CreatePath(const std::string& path, mode_t mode) {
@@ -115,7 +121,7 @@ static int CreatePath(const std::string& path, mode_t mode) {
   if (status == 0)
     status = DoCreatePath(path.c_str(), mode);
   free(copypath);
-  return (status);		
+  return (status);
 }
 
 void Init(const LogLevel level, const std::string &log_dir, const std::string &file_prefix, const bool screen_out) {
@@ -130,21 +136,59 @@ void Init(const LogLevel level, const std::string &log_dir, const std::string &f
 	if (!log_path.empty() && *log_path.rbegin() == '/') {
 		log_path.erase(log_path.size()-1);
 	}
+  log_meta.dir = log_path;
 
-	std::string file_name;
+	std::string file_path, half_file_path;
+  half_file_path = log_path + "/" + (file_prefix.empty() ? "" : (file_prefix + "_"));
 	FILE *file;
 	for (int32_t idx = kTrace; idx < kMaxLevel; ++idx) {
-		file_name = file_prefix.empty() ? "" : (file_prefix + "_");
-		file_name = log_path + "/" + file_name; 
-		file_name += log_meta.log_level_strs[static_cast<LogLevel>(idx)] + ".log";
-		file = fopen(file_name.c_str(), "a+");
+		file_path = half_file_path + log_meta.log_level_strs[static_cast<LogLevel>(idx)] + ".log";
+		file = fopen(file_path.c_str(), "a+");
 		if (file == NULL) {
-			std::cerr << __FILE__ << ":"  << __LINE__ << ", Open " << file_name << " failed" << std::endl;
+      WriteFormat(stderr, "%s:%u, open %s failed\n", __FILE__, __LINE__, file_path.c_str());
 			exit(-1);
 		}
-
-		log_meta.log_level_files.insert(std::make_pair(static_cast<LogLevel>(idx), file));
+    std::shared_ptr<MlogFile> ptr = std::make_shared<MlogFile>(file);
+		log_meta.log_level_files.insert(std::make_pair(static_cast<LogLevel>(idx), ptr));
 	}
+}
+
+void BackupAndSwitchLog(const std::string& d) {
+  std::string date = d;
+  if (date.empty()) { 
+    char buf[64];
+    time_t now = time(NULL);
+    strftime(buf, sizeof(buf), "%Y%m%d", localtime(&now));
+    date.assign(buf, strlen(buf));
+  }
+  
+  std::string backup_dir = log_meta.dir + "/backup";
+  if (access(backup_dir.c_str(), F_OK)) {
+    CreatePath(backup_dir.c_str(), 0775);
+  }
+
+  std::string file_path, back_file_path, file_name;
+  std::string half_file_name = log_meta.file_prefix;
+  if (half_file_name.empty()) {
+    half_file_name += "_";
+  }
+  
+  for (int32_t idx = kTrace; idx < kMaxLevel; ++idx) {
+    file_name += half_file_name + log_meta.log_level_strs[static_cast<LogLevel>(idx)] + ".log";
+    file_path = log_meta.dir + "/" + file_name;   
+    back_file_path = backup_dir + "/" + file_name + "." + date;
+    /*
+     * not care the successity of rename
+     */
+    rename(file_path.c_str(), back_file_path.c_str());
+    FILE* fp =fopen(file_path.c_str(), "a+");
+    if (!fp) {
+      continue; 
+    }
+    pthread_rwlock_wrlock(log_meta.log_level_files_rwlock);  
+    log_meta.log_level_files[static_cast<LogLevel>(idx)] = std::make_shared<MlogFile>(fp); 
+    pthread_rwlock_unlock(log_meta.log_level_files_rwlock);
+  }
 }
 
 static LogLevel InterpretLogLevel(const std::string level_str) {
@@ -188,16 +232,13 @@ Log::~Log() {
   }
 
 	if (log_meta.screen_out) {
-		pthread_mutex_lock(log_meta.screen_mutex_);
-		std::cerr << str;
-		pthread_mutex_unlock(log_meta.screen_mutex_);
+    fwrite(str.c_str(), str.size(), 1,stdout);
 	}
 
-	pthread_mutex_lock(log_meta.log_level_mutexes_[self_level_]);
-	if (fwrite(str.c_str(), str.size(), 1, log_meta.log_level_files[self_level_]) < 1) {
-		 std::cerr << __FILE__ << ":"  << __LINE__ << ", write " << log_meta.log_level_strs[self_level_] << " failed" << std::endl;
+  std::shared_ptr<MlogFile> file_ptr = log_meta.log_level_files[self_level_];
+	if (fwrite(str.c_str(), str.size(), 1, file_ptr->fp) < 1) {
+    WriteFormat(stderr, "%s:%u, write %s failed\n", __FILE__, __LINE__, log_meta.log_level_strs[self_level_].c_str());
 	}
-	pthread_mutex_unlock(log_meta.log_level_mutexes_[self_level_]);
 }
 
 int32_t Write(const LogLevel level, const std::string& str) {
@@ -208,57 +249,57 @@ int32_t Write(const LogLevel level, const std::string& str) {
 	std::string line(log_meta.log_level_prompts[level]);
 	line.append(str);
 	if (log_meta.screen_out) {
-		pthread_mutex_lock(log_meta.screen_mutex_);
-		std::cerr << line;
-		pthread_mutex_unlock(log_meta.screen_mutex_);
+    fwrite(line.c_str(), line.size(), 1, stdout); 
 	}
 
-	pthread_mutex_lock(log_meta.log_level_mutexes_[level]);
-	ret = fwrite(line.c_str(), line.size(), 1, log_meta.log_level_files[level]);
+  pthread_rwlock_rdlock(log_meta.log_level_files_rwlock);
+  std::shared_ptr<MlogFile> file_ptr = log_meta.log_level_files[level];
+  pthread_rwlock_unlock(log_meta.log_level_files_rwlock);
+	ret = fwrite(line.c_str(), line.size(), 1, file_ptr->fp);
   #ifdef DEBUG	
 	if (ret != -1) {
-		fflush(log_meta.log_level_files[level]);
+		fflush(file_ptr->fp);
 	}
 	#endif
-	pthread_mutex_unlock(log_meta.log_level_mutexes_[level]); 
   if (ret < 1) {
-		 std::cerr << __FILE__ << ":"  << __LINE__ << ", write " << log_meta.log_level_strs[level] << " failed" << std::endl;
+     WriteFormat(stderr, "%s:%u, write %s failed\n", __FILE__, __LINE__, log_meta.log_level_strs[level].c_str());
 	}
   return ret;
 }
 
 int32_t Write(const LogLevel level, const char* format, ...) {
-  static char buf[1024];
-
   int32_t ret = 0;
   if (level < work_level) {
     return ret;
-  }
- 	memcpy(buf, log_meta.log_level_prompts[level].data(), log_meta.log_level_prompts[level].size());
-  if (log_meta.screen_out) {
-    va_list vl;
-    va_start(vl, format);
-		pthread_mutex_lock(log_meta.screen_mutex_);
-    fprintf(stderr, format, vl); 
-		pthread_mutex_unlock(log_meta.screen_mutex_);
-    va_end(vl);
-  }
-  
+  } 
+
+  char buf[1024];
   va_list vl;
   va_start(vl, format);
-  int32_t len = vsnprintf(buf+log_meta.log_level_prompts[level].size(), sizeof(buf) - log_meta.log_level_prompts[level].size(), format, vl);
+  int32_t len = vsnprintf(buf, sizeof(buf), format, vl);
   va_end(vl); 
   if (len < 0) {
     return -1;
   }
+  std::string line = log_meta.log_level_prompts[level]; 
+  line.append(buf, len);
+  if (log_meta.screen_out) {
+    fwrite(line.c_str(), line.size(), 1, stdout);
+  }
 
-	pthread_mutex_lock(log_meta.log_level_mutexes_[level]);
-	ret = fwrite(buf, len, 1, log_meta.log_level_files[level]);
-	pthread_mutex_unlock(log_meta.log_level_mutexes_[level]); 
+  pthread_rwlock_rdlock(log_meta.log_level_files_rwlock);
+  std::shared_ptr<MlogFile> file_ptr = log_meta.log_level_files[level];
+  pthread_rwlock_unlock(log_meta.log_level_files_rwlock);
+	ret = fwrite(line.c_str(), line.size(), 1, file_ptr->fp);
+#ifdef DEBUG
+  if (ret != -1) {
+    fflush(file_ptr->fp);
+  }
+#endif
   if (ret < 1) {
-		 std::cerr << __FILE__ << ":"  << __LINE__ << ", write " << log_meta.log_level_strs[level] << " failed" << std::endl;
+     WriteFormat(stderr, "%s:%u, write %s failed\n", __FILE__, __LINE__, log_meta.log_level_strs[level].c_str());
 	}
-  
   return ret;
 }
+
 }
