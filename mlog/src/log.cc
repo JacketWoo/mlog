@@ -169,12 +169,12 @@ void BackupAndSwitchLog(const std::string& d) {
 
   std::string file_path, back_file_path, file_name;
   std::string half_file_name = log_meta.file_prefix;
-  if (half_file_name.empty()) {
+  if (!half_file_name.empty()) {
     half_file_name += "_";
   }
   
   for (int32_t idx = kTrace; idx < kMaxLevel; ++idx) {
-    file_name += half_file_name + log_meta.log_level_strs[static_cast<LogLevel>(idx)] + ".log";
+    file_name = half_file_name + log_meta.log_level_strs[static_cast<LogLevel>(idx)] + ".log";
     file_path = log_meta.dir + "/" + file_name;   
     back_file_path = backup_dir + "/" + file_name + "." + date;
     /*
@@ -183,7 +183,7 @@ void BackupAndSwitchLog(const std::string& d) {
     rename(file_path.c_str(), back_file_path.c_str());
     FILE* fp =fopen(file_path.c_str(), "a+");
     if (!fp) {
-      continue; 
+      continue;
     }
     pthread_rwlock_wrlock(log_meta.log_level_files_rwlock);  
     log_meta.log_level_files[static_cast<LogLevel>(idx)] = std::make_shared<MlogFile>(fp); 
